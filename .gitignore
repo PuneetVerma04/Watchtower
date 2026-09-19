@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# Results (regenerable — see planning/05_REPO_CONVENTIONS.md §6)
+results/*.sqlite
+results/*.sqlite-journal
+results/*.sqlite-wal
+
+# OS / editor
+.DS_Store
