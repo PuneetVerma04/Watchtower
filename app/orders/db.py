@@ -30,9 +30,11 @@ async def init_schema() -> None:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS orders (
-                id SERIAL PRIMARY KEY,
+                order_id SERIAL PRIMARY KEY,
                 item TEXT NOT NULL,
-                quantity INTEGER NOT NULL
+                quantity INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'created',
+                created_at TIMESTAMP NOT NULL DEFAULT NOW()
             )
             """
         )
