@@ -1,12 +1,38 @@
 CLUSTER_NAME := watchtower
 
-.PHONY: cluster-up cluster-down lint fmt
+.PHONY: cluster-up cluster-down build load deploy redeploy verify lint fmt
 
 cluster-up:
 	kind create cluster --name $(CLUSTER_NAME) --config cluster/kind-config.yaml
 
 cluster-down:
 	kind delete cluster --name $(CLUSTER_NAME)
+
+build:
+	docker build -f app/orders/Dockerfile -t orders:dev .
+	docker build -f app/gateway/Dockerfile -t gateway:dev .
+
+load: build
+	kind load docker-image orders:dev gateway:dev --name $(CLUSTER_NAME)
+
+deploy:
+	kubectl create secret generic postgres-credentials --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
+	kubectl apply -f cluster/manifests/postgres-statefulset.yaml -f cluster/manifests/postgres-service.yaml
+	kubectl wait --for=condition=Ready pod -l app=postgres --timeout=60s
+	kubectl apply -f cluster/manifests/orders-deployment.yaml -f cluster/manifests/orders-service.yaml
+	kubectl apply -f cluster/manifests/gateway-deployment.yaml -f cluster/manifests/gateway-service.yaml
+	kubectl rollout restart deployment/orders deployment/gateway
+	kubectl wait --for=condition=Ready pod -l app=orders --timeout=60s
+	kubectl wait --for=condition=Ready pod -l app=gateway --timeout=60s
+
+verify:
+	kubectl port-forward svc/gateway 8000:8000 & \
+	PF_PID=$$!; \
+	sleep 2; \
+	curl -f http://localhost:8000/healthz && echo; \
+	kill $$PF_PID
+
+redeploy: load deploy verify
 
 lint:
 	uv run ruff check .
