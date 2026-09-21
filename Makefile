@@ -31,7 +31,14 @@ verify:
 	kubectl port-forward svc/gateway 8000:8000 -n watchtower & \
 	PF_PID=$$!; \
 	sleep 2; \
-	curl -f http://localhost:8000/healthz && echo; \
+	curl -f http://localhost:8000/healthz; echo; \
+	RESPONSE=$$(curl -f -s -X POST http://localhost:8000/orders \
+		-H "Content-Type: application/json" \
+		-d '{"item": "verify-smoke-test", "quantity": 1}'); \
+	echo "$$RESPONSE"; \
+	echo "$$RESPONSE" | grep -q '"order_id"' \
+		&& echo "orders round-trip OK" \
+		|| (echo "orders round-trip FAILED"; kill $$PF_PID; exit 1); \
 	kill $$PF_PID
 
 redeploy: load deploy verify
