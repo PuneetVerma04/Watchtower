@@ -11,9 +11,10 @@ cluster-down:
 build:
 	docker build -f app/orders/Dockerfile -t orders:dev .
 	docker build -f app/gateway/Dockerfile -t gateway:dev .
+	docker build -f app/inventory/Dockerfile -t inventory:dev .
 
 load: build
-	kind load docker-image orders:dev gateway:dev --name $(CLUSTER_NAME)
+	kind load docker-image orders:dev gateway:dev inventory:dev --name $(CLUSTER_NAME)
 
 deploy:
 	kubectl apply -f cluster/manifests/namespace.yaml
@@ -23,23 +24,29 @@ deploy:
 	kubectl wait --for=condition=Ready pod -l app=postgres -n watchtower --timeout=60s
 	kubectl apply -f cluster/manifests/orders-deployment.yaml -f cluster/manifests/orders-service.yaml
 	kubectl apply -f cluster/manifests/gateway-deployment.yaml -f cluster/manifests/gateway-service.yaml
-	kubectl rollout restart deployment/orders deployment/gateway -n watchtower
+	kubectl apply -f cluster/manifests/inventory-deployment.yaml -f cluster/manifests/inventory-service.yaml
+	kubectl rollout restart deployment/orders deployment/gateway deployment/inventory -n watchtower
 	kubectl wait --for=condition=Ready pod -l app=orders -n watchtower --timeout=60s
 	kubectl wait --for=condition=Ready pod -l app=gateway -n watchtower --timeout=60s
+	kubectl wait --for=condition=Ready pod -l app=inventory -n watchtower --timeout=60s
 
 verify:
 	kubectl port-forward svc/gateway 8000:8000 -n watchtower & \
-	PF_PID=$$!; \
+	GW_PID=$$!; \
+	kubectl port-forward svc/inventory 8001:8000 -n watchtower & \
+	INV_PID=$$!; \
 	sleep 2; \
 	curl -f http://localhost:8000/healthz; echo; \
+	curl -f http://localhost:8001/healthz; echo; \
+	curl -f -s http://localhost:8001/check/verify-smoke-test; echo; \
 	RESPONSE=$$(curl -f -s -X POST http://localhost:8000/orders \
 		-H "Content-Type: application/json" \
 		-d '{"item": "verify-smoke-test", "quantity": 1}'); \
 	echo "$$RESPONSE"; \
 	echo "$$RESPONSE" | grep -q '"order_id"' \
 		&& echo "orders round-trip OK" \
-		|| (echo "orders round-trip FAILED"; kill $$PF_PID; exit 1); \
-	kill $$PF_PID
+		|| (echo "orders round-trip FAILED"; kill $$GW_PID $$INV_PID; exit 1); \
+	kill $$GW_PID $$INV_PID
 
 redeploy: load deploy verify
 

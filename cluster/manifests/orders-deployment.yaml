@@ -30,6 +30,8 @@ spec:
               valueFrom: { secretKeyRef: { name: postgres-credentials, key: POSTGRES_PASSWORD } }
             - name: POSTGRES_DB
               valueFrom: { secretKeyRef: { name: postgres-credentials, key: POSTGRES_DB } }
+            - name: INVENTORY_URL
+              value: http://inventory:8000
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 250m, memory: 256Mi }

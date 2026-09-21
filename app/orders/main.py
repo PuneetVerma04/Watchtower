@@ -1,17 +1,22 @@
+import os
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 
+import httpx
 from db import cache, close_pool, init_schema, open_pool, pool
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
+
+INVENTORY_URL = os.environ.get("INVENTORY_URL", "http://inventory:8000")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await open_pool()
     await init_schema()
+    app.state.client = httpx.AsyncClient(timeout=5.0)   
     yield
+    await app.state.client.aclose()
     await close_pool()
 
 
@@ -51,7 +56,9 @@ async def get_orders(id: int):
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT order_id, item, quantity, status, created_at FROM orders WHERE order_id = %s",
+                "SELECT order_id, item, quantity, status, created_at " \
+                "FROM " \
+                "orders WHERE order_id = %s",
                 (id,),
             )
             row = await cur.fetchone()
@@ -67,7 +74,19 @@ async def get_orders(id: int):
 
 
 @app.post("/orders", response_model=OrderResponse)
-async def create_order(order: OrderRequest):
+async def create_order(order: OrderRequest, request: Request):
+    # Check inventory service for item availability
+    
+    try:
+        response = await request.app.state.client.get(f"{INVENTORY_URL}/check/{order.item}")
+        response.raise_for_status()
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Inventory service unavailable: {exc}")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code, detail="Inventory service error"
+        )
+
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
