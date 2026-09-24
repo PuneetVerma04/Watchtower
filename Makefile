@@ -21,7 +21,9 @@ deploy:
 	kubectl config set-context --current --namespace=watchtower
 	kubectl create secret generic postgres-credentials -n watchtower --from-env-file=.env --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -f cluster/manifests/postgres-statefulset.yaml -f cluster/manifests/postgres-service.yaml
+	kubectl apply -f cluster/manifests/redis-statefulset.yaml -f cluster/manifests/redis-service.yaml
 	kubectl wait --for=condition=Ready pod -l app=postgres -n watchtower --timeout=60s
+	kubectl wait --for=condition=Ready pod -l app=redis -n watchtower --timeout=60s
 	kubectl apply -f cluster/manifests/orders-deployment.yaml -f cluster/manifests/orders-service.yaml
 	kubectl apply -f cluster/manifests/gateway-deployment.yaml -f cluster/manifests/gateway-service.yaml
 	kubectl apply -f cluster/manifests/inventory-deployment.yaml -f cluster/manifests/inventory-service.yaml

@@ -38,3 +38,14 @@ async def init_schema() -> None:
             )
             """
         )
+
+
+async def update_order_status(order_id: int, status: str) -> tuple | None:
+    async with pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE orders SET status = %s WHERE order_id = %s "
+                "RETURNING order_id, item, quantity, status, created_at",
+                (status, order_id),
+            )
+            return await cur.fetchone()
