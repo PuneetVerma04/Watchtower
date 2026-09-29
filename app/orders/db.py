@@ -1,5 +1,7 @@
+import json
 import os
 
+import redis.asyncio
 from psycopg_pool import AsyncConnectionPool
 
 CONNINFO = (
@@ -9,6 +11,11 @@ CONNINFO = (
     f"password={os.environ['POSTGRES_PASSWORD']} "
     f"dbname={os.environ['POSTGRES_DB']}"
 )
+
+REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+
+redis_client = redis.asyncio.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
 # Deliberately small, not a bug to fix later
 pool = AsyncConnectionPool(conninfo=CONNINFO, min_size=1, max_size=2, open=False)
@@ -49,3 +56,12 @@ async def update_order_status(order_id: int, status: str) -> tuple | None:
                 (status, order_id),
             )
             return await cur.fetchone()
+
+
+async def close_redis() -> None:
+    await redis_client.aclose()
+
+
+async def push_job(order_id: int, item: str, quantity: int) -> None:
+    payload = json.dumps({"order_id": order_id, "item": item, "quantity": quantity})
+    await redis_client.rpush("orders_queue", payload)

@@ -3,7 +3,16 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 
 import httpx
-from db import cache, close_pool, init_schema, open_pool, pool
+from db import (
+    cache,
+    close_pool,
+    close_redis,
+    init_schema,
+    open_pool,
+    pool,
+    push_job,
+    update_order_status,
+)
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
@@ -18,6 +27,7 @@ async def lifespan(app: FastAPI):
     yield
     await app.state.client.aclose()
     await close_pool()
+    await close_redis()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -26,6 +36,10 @@ app = FastAPI(lifespan=lifespan)
 class OrderRequest(BaseModel):
     item: str
     quantity: int
+
+
+class StatusUpdate(BaseModel):
+    status: str
 
 
 class OrderResponse(BaseModel):
@@ -100,4 +114,19 @@ async def create_order(order: OrderRequest, request: Request):
         order_id=row[0], item=order.item, quantity=order.quantity, status=row[1], created_at=row[2]
     )
     cache[new_order.order_id] = new_order
+    await push_job(new_order.order_id, new_order.item, new_order.quantity)
     return new_order
+
+
+@app.patch("/orders/{id}/status", response_model=OrderResponse)
+async def set_order_status(id: int, update: StatusUpdate):
+    row = await update_order_status(id, update.status)
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    order = OrderResponse(
+        order_id=row[0], item=row[1], quantity=row[2], status=row[3], created_at=row[4]
+    )
+    cache[id] = order
+    return order

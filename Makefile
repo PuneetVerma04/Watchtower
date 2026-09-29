@@ -12,9 +12,10 @@ build:
 	docker build -f app/orders/Dockerfile -t orders:dev .
 	docker build -f app/gateway/Dockerfile -t gateway:dev .
 	docker build -f app/inventory/Dockerfile -t inventory:dev .
+	docker build -f app/worker/Dockerfile -t worker:dev .
 
 load: build
-	kind load docker-image orders:dev gateway:dev inventory:dev --name $(CLUSTER_NAME)
+	kind load docker-image orders:dev gateway:dev inventory:dev worker:dev --name $(CLUSTER_NAME)
 
 deploy:
 	kubectl apply -f cluster/manifests/namespace.yaml
@@ -27,10 +28,12 @@ deploy:
 	kubectl apply -f cluster/manifests/orders-deployment.yaml -f cluster/manifests/orders-service.yaml
 	kubectl apply -f cluster/manifests/gateway-deployment.yaml -f cluster/manifests/gateway-service.yaml
 	kubectl apply -f cluster/manifests/inventory-deployment.yaml -f cluster/manifests/inventory-service.yaml
-	kubectl rollout restart deployment/orders deployment/gateway deployment/inventory -n watchtower
+	kubectl apply -f cluster/manifests/worker-deployment.yaml
+	kubectl rollout restart deployment/orders deployment/gateway deployment/inventory deployment/worker -n watchtower
 	kubectl wait --for=condition=Ready pod -l app=orders -n watchtower --timeout=60s
 	kubectl wait --for=condition=Ready pod -l app=gateway -n watchtower --timeout=60s
 	kubectl wait --for=condition=Ready pod -l app=inventory -n watchtower --timeout=60s
+	kubectl wait --for=condition=Ready pod -l app=worker -n watchtower --timeout=60s
 
 verify:
 	kubectl port-forward svc/gateway 8000:8000 -n watchtower & \
@@ -48,6 +51,13 @@ verify:
 	echo "$$RESPONSE" | grep -q '"order_id"' \
 		&& echo "orders round-trip OK" \
 		|| (echo "orders round-trip FAILED"; kill $$GW_PID $$INV_PID; exit 1); \
+	ORDER_ID=$$(echo "$$RESPONSE" | grep -o '"order_id":[0-9]*' | grep -o '[0-9]*'); \
+	sleep 3; \
+	STATUS_RESPONSE=$$(curl -f -s http://localhost:8000/orders/$$ORDER_ID); \
+	echo "$$STATUS_RESPONSE"; \
+	echo "$$STATUS_RESPONSE" | grep -q '"status":"fulfilled"' \
+		&& echo "worker fulfillment OK" \
+		|| (echo "worker fulfillment FAILED"; kill $$GW_PID $$INV_PID; exit 1); \
 	kill $$GW_PID $$INV_PID
 
 redeploy: load deploy verify
