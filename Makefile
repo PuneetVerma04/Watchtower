@@ -1,6 +1,6 @@
 CLUSTER_NAME := watchtower
 
-.PHONY: cluster-up cluster-down build load deploy redeploy verify lint fmt
+.PHONY: cluster-up cluster-down build load deploy redeploy verify scenario scenario-restore lint fmt
 
 cluster-up:
 	kind create cluster --name $(CLUSTER_NAME) --config cluster/kind-config.yaml
@@ -61,6 +61,14 @@ verify:
 	kill $$GW_PID $$INV_PID
 
 redeploy: load deploy verify
+
+scenario:
+	@test -n "$(ID)" || (echo "usage: make scenario ID=S03"; exit 1)
+	bash scenarios/$(ID)/inject.sh
+
+scenario-restore:
+	@test -n "$(ID)" || (echo "usage: make scenario-restore ID=S03"; exit 1)
+	bash scenarios/$(ID)/restore.sh
 
 lint:
 	uv run ruff check .

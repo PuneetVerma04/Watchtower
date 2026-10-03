@@ -11,6 +11,9 @@ ORDERS_URL = os.environ.get("ORDERS_URL", "http://orders:8000")
 LEAK_ENABLED = os.getenv("MEMORY_LEAK_ENABLED", "false").lower() == "true"
 _leaked_memory: list[bytearray] = []
 
+# Simulated work per job; 0 drains instantly, raise it so the queue can back up
+PROCESS_MS = float(os.getenv("PROCESS_MS", "0"))
+
 
 async def get_redis_client():
     redis_host = os.getenv("REDIS_HOST", "localhost")
@@ -23,9 +26,12 @@ async def get_job_from_queue(redis_client, queue_name):
 
 
 async def process_job(payload):
-    # Placeholder for job processing logic
-    print(f"Processing job: {payload}")
-    return payload
+    print(f"Processing order_id={payload['order_id']} quantity={payload['quantity']}")
+
+    await asyncio.sleep(PROCESS_MS / 1000)
+
+    if LEAK_ENABLED:
+        _leaked_memory.append(bytearray(1_000_000))
 
 
 async def update_job_status(client: httpx.AsyncClient, order_id: int, status: str) -> None:
@@ -46,10 +52,6 @@ async def main():
                 order_id = payload["order_id"]
 
                 await process_job(payload)
-
-                if LEAK_ENABLED:
-                    _leaked_memory.append(bytearray(1_000_000))
-
                 await update_job_status(client, order_id, "fulfilled")
             except Exception as exc:
                 print(f"Failed to process job: {exc}")

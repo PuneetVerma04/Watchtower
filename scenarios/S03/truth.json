@@ -1,0 +1,15 @@
+{
+  "id": "S03",
+  "name": "ImagePullBackOff",
+  "root_cause": "The inventory Deployment was updated to image tag inventory:v2, which does not exist, so the new pod cannot pull its image.",
+  "affected_component": "deployment/inventory",
+  "observable_signals": [
+    "A new inventory pod is in ErrImagePull / ImagePullBackOff",
+    "Pod events report a failed pull of inventory:v2",
+    "The previous inventory pod is still serving; the rollout is stalled with an unavailable replica"
+  ],
+  "accepted_remediations": [
+    "Roll back deployment/inventory to its previous revision",
+    "Set the inventory image back to a tag that exists (inventory:dev)"
+  ]
+}
