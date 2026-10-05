@@ -11,5 +11,10 @@
   "accepted_remediations": [
     "Roll back deployment/inventory to its previous revision",
     "Set the inventory image back to a tag that exists (inventory:dev)"
-  ]
+  ],
+  "ineffective_remediations": [
+  "Restart the inventory pod or Deployment: it pulls the same nonexistent tag again",
+  "Scale deployment/inventory up: every new replica fails the same image pull",
+  "Restart or redeploy other services (orders, gateway): they are healthy, and the old inventory pod is still serving"
+]
 }
