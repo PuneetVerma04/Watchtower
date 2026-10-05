@@ -27,7 +27,7 @@ deploy:
 	kubectl wait --for=condition=Ready pod -l app=redis -n watchtower --timeout=60s
 	kubectl apply -f cluster/manifests/orders-deployment.yaml -f cluster/manifests/orders-service.yaml
 	kubectl apply -f cluster/manifests/gateway-deployment.yaml -f cluster/manifests/gateway-service.yaml
-	kubectl apply -f cluster/manifests/inventory-deployment.yaml -f cluster/manifests/inventory-service.yaml
+	kubectl apply -f cluster/manifests/inventory-configmap.yaml -f cluster/manifests/inventory-deployment.yaml -f cluster/manifests/inventory-service.yaml
 	kubectl apply -f cluster/manifests/worker-deployment.yaml
 	kubectl rollout restart deployment/orders deployment/gateway deployment/inventory deployment/worker -n watchtower
 	kubectl wait --for=condition=Ready pod -l app=orders -n watchtower --timeout=60s

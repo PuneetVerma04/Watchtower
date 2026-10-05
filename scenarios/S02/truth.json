@@ -1,0 +1,21 @@
+{
+  "id": "S02",
+  "name": "CrashLoopBackOff",
+  "root_cause": "The inventory-config ConfigMap's LATENCY_MS was set to the non-numeric value 'abc'. inventory/main.py parses it with float() at import time, so every new inventory pod raises ValueError at startup and crash-loops.",
+  "affected_component": "configmap/inventory-config",
+  "observable_signals": [
+    "A new inventory pod is in CrashLoopBackOff and its restart count keeps climbing",
+    "The previous container's logs (kubectl logs --previous) show a ValueError for the value 'abc'",
+    "The inventory-config ConfigMap holds LATENCY_MS: 'abc'",
+    "The previous inventory pod is still serving; the rollout is stalled with an unavailable replica"
+  ],
+  "accepted_remediations": [
+    "Set LATENCY_MS in the inventory-config ConfigMap back to a numeric value, then restart deployment/inventory so the new value is read"
+  ],
+  "ineffective_remediations": [
+    "Roll back deployment/inventory to its previous revision: the bad value is in the ConfigMap, which is not part of a Deployment revision",
+    "Restart the inventory pod or Deployment without fixing the ConfigMap: the new pod reads the same bad value",
+    "Scale deployment/inventory up: every new replica reads the same bad value",
+    "Restart or redeploy other services (orders, gateway): they are healthy, and the old inventory pod is still serving"
+  ]
+}

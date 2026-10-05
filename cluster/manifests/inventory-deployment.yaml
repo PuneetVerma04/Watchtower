@@ -21,7 +21,10 @@ spec:
             - containerPort: 8000
           env:
             - name: LATENCY_MS
-              value: "100"
+              valueFrom:
+                configMapKeyRef:
+                  name: inventory-config
+                  key: LATENCY_MS
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 250m, memory: 256Mi }
