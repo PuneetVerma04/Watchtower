@@ -14,15 +14,23 @@ _leaked_memory: list[bytearray] = []
 # Simulated work per job; 0 drains instantly, raise it so the queue can back up
 PROCESS_MS = float(os.getenv("PROCESS_MS", "0"))
 
+# BLPOP returns None after this many idle seconds; the socket timeout must outlast it
+BLPOP_TIMEOUT = 5
+
 
 async def get_redis_client():
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", 6379))
-    return redis.asyncio.Redis(host=redis_host, port=redis_port, decode_responses=True)
+    return redis.asyncio.Redis(
+        host=redis_host,
+        port=redis_port,
+        decode_responses=True,
+        socket_timeout=BLPOP_TIMEOUT + 5,
+    )
 
 
 async def get_job_from_queue(redis_client, queue_name):
-    return await redis_client.blpop(queue_name)
+    return await redis_client.blpop(queue_name, timeout=BLPOP_TIMEOUT)
 
 
 async def process_job(payload):
@@ -48,6 +56,8 @@ async def main():
         while True:
             try:
                 job = await get_job_from_queue(redis_client, "orders_queue")
+                if job is None:
+                    continue
                 payload = json.loads(job[1])
                 order_id = payload["order_id"]
 
