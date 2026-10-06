@@ -8,7 +8,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+# Run from the venv directly: `uv run` would re-sync at startup and reinstall dev dependencies
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
 # This service's source only
 COPY app/worker/*.py ./
 
-CMD ["uv", "run", "python", "main.py"]
+CMD ["python", "main.py"]
