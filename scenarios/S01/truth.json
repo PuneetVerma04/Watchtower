@@ -1,0 +1,24 @@
+{
+  "id": "S01",
+  "name": "OOMKilled",
+  "root_cause": "The worker has its memory leak enabled (MEMORY_LEAK_ENABLED=true): every processed job retains about 1MB that is never released. Its memory limit is 96Mi, only about 45MiB above its idle footprint, so after a few dozen processed jobs the container exceeds the limit and the kernel OOM-kills it.",
+  "affected_component": "deployment/worker",
+  "observable_signals": [
+    "The worker pod has restarted: RESTARTS is at least 1, and its last state is Terminated with reason OOMKilled and exit code 137",
+    "The previous container's logs (kubectl logs --previous) show normal 'Processing order_id=...' lines that stop abruptly, with no exception or traceback",
+    "The worker Deployment spec shows MEMORY_LEAK_ENABLED=true and a memory limit of 96Mi",
+    "Every other service (gateway, orders, inventory, redis, postgres) is healthy; only the worker is affected",
+    "An order whose job was in flight when the container was killed may stay in 'created' status and never become 'fulfilled'"
+  ],
+  "accepted_remediations": [
+    "Set MEMORY_LEAK_ENABLED back to false on deployment/worker (removes the leak)",
+    "Roll back deployment/worker to its previous revision (restores both the leak flag and the original memory limit)",
+    "Raise the worker's memory limit (mitigation only: the leak remains, so it will eventually be OOM-killed again at a higher job count)"
+  ],
+  "ineffective_remediations": [
+    "Restart the worker pod or Deployment: memory resets, but the leak returns as soon as it processes jobs again",
+    "Scale deployment/worker up: every replica leaks at the same rate per job, so each is OOM-killed too",
+    "Flush or trim the Redis queue: the leak grows with jobs processed, not with queue backlog",
+    "Restart or redeploy other services (orders, gateway, inventory, redis, postgres): they are healthy and unrelated"
+  ]
+}
