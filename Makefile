@@ -1,6 +1,6 @@
 CLUSTER_NAME := watchtower
 
-.PHONY: cluster-up cluster-down build load deploy redeploy verify scenario scenario-restore lint fmt
+.PHONY: cluster-up cluster-down build load deploy redeploy verify scenario scenario-restore model-smoke gate lint fmt
 
 cluster-up:
 	kind create cluster --name $(CLUSTER_NAME) --config cluster/kind-config.yaml
@@ -69,6 +69,14 @@ scenario:
 scenario-restore:
 	@test -n "$(ID)" || (echo "usage: make scenario-restore ID=S03"; exit 1)
 	bash scenarios/$(ID)/restore.sh
+
+model-smoke:
+	uv run python -m watchtower.models.smoke
+
+# W4 tool-calling gate. Cluster not needed (replays the fixtures). Pass extra flags via ARGS,
+# e.g. make gate ARGS='--server-note "FA=1 KV=q8_0" --num-ctx 8192'
+gate:
+	uv run python -m watchtower.eval.tool_calling.run $(ARGS)
 
 lint:
 	uv run ruff check .
