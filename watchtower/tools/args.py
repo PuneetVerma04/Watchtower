@@ -13,9 +13,16 @@ Rules:
 """
 
 import re
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 K8S_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$")
 
@@ -53,43 +60,83 @@ HttpPath = Annotated[
 class _Args(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_means_omitted(cls, data: Any) -> Any:
+        """An empty or whitespace-only string for an optional parameter means "not supplied".
+
+        A flat `type: string` schema makes the small model write "" for "omit" (W4 round 1:
+        `selector: ""`, `name: ""`). Only parameters that have a default are affected: a blank
+        required parameter, and a blank unknown key, are still rejected.
+        """
+        if not isinstance(data, dict):
+            return data
+        optional = {n for n, f in cls.model_fields.items() if not f.is_required()}
+        return {
+            k: v
+            for k, v in data.items()
+            if not (k in optional and isinstance(v, str) and not v.strip())
+        }
+
 
 class GetPodsArgs(_Args):
-    name: K8sName | None = Field(None, description="Only this pod")
-    selector: Selector | None = Field(None, description="Label selector, e.g. app=worker")
+    name: K8sName | None = Field(
+        None, description="Exact pod name, no kind prefix. Omit to list all pods."
+    )
+    selector: Selector | None = Field(
+        None, description="Label selector key=value, e.g. app=worker. Omit for no filtering."
+    )
 
 
 class GetPodLogsArgs(_Args):
-    pod: K8sName
-    container: K8sName | None = Field(None, description="Only needed for multi-container pods")
-    previous: bool = Field(False, description="Logs of the previous (crashed) container")
-    tail_lines: int = Field(50, ge=1, le=200, description="Number of most recent lines")
+    pod: K8sName = Field(
+        description="Exact pod name as returned by get_pods, no kind prefix like 'pod/'."
+    )
+    container: K8sName | None = Field(
+        None, description="Container name. Omit unless the pod has several containers."
+    )
+    previous: bool = Field(
+        False, description="true for the logs of the previous (crashed) container."
+    )
+    tail_lines: int = Field(50, ge=1, le=200, description="Number of most recent log lines.")
 
 
 class DescribePodArgs(_Args):
-    pod: K8sName
+    pod: K8sName = Field(
+        description="Exact pod name as returned by get_pods, no kind prefix like 'pod/'."
+    )
 
 
 class GetEventsArgs(_Args):
-    involved_object: K8sName | None = Field(None, description="Only events about this object")
+    involved_object: K8sName | None = Field(
+        None,
+        description="Bare name of one object, e.g. a pod name; no kind prefix like 'pod/'. "
+        "Omit for all events.",
+    )
 
 
 class GetDeploymentArgs(_Args):
-    name: K8sName | None = None
+    name: K8sName | None = Field(
+        None, description="Exact deployment name, no kind prefix. Omit to list all deployments."
+    )
 
 
 class GetConfigMapArgs(_Args):
-    name: K8sName | None = None
+    name: K8sName | None = Field(
+        None, description="Exact ConfigMap name, no kind prefix. Omit to list all ConfigMaps."
+    )
 
 
 class GetServiceArgs(_Args):
-    name: K8sName | None = None
+    name: K8sName | None = Field(
+        None, description="Exact Service name, no kind prefix. Omit to list all Services."
+    )
 
 
 class HttpProbeArgs(_Args):
-    service: K8sName
-    port: int = Field(ge=1, le=65535)
-    path: HttpPath = Field("/healthz", description="Path to GET, e.g. /healthz")
+    service: K8sName = Field(description="Exact Service name, no kind prefix.")
+    port: int = Field(ge=1, le=65535, description="TCP port of the Service.")
+    path: HttpPath = Field("/healthz", description="URL path to GET. Must start with '/'.")
 
 
 class GetMetricsArgs(_Args):

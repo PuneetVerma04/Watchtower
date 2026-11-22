@@ -25,6 +25,7 @@ from watchtower.tools.args import (
 )
 from watchtower.tools.backend import Backend
 from watchtower.tools.provenance import ToolResult, fail
+from watchtower.tools.schema import describe_error, flatten_parameters
 
 
 class Tier(IntEnum):
@@ -42,6 +43,11 @@ class ToolSpec:
     fn: Callable[[Backend, Any], ToolResult[Any]]
 
 
+# Every tool is pinned to one namespace (backend.NAMESPACE); a model that is not told so invents
+# a `namespace` argument (first W4 run: c5-invented-field, c4-other-namespace).
+_NS = "Always the watchtower namespace; there is no namespace parameter."
+
+
 def _spec(name: str, description: str, args_model: type[BaseModel], fn) -> ToolSpec:
     return ToolSpec(name, Tier.READ_ONLY, description, args_model, fn)
 
@@ -51,42 +57,57 @@ TOOLS: dict[str, ToolSpec] = {
     for s in [
         _spec(
             "get_pods",
-            "List pods with phase, readiness, restarts and container state.",
+            "List pods with phase, readiness, restarts and container state. " + _NS,
             GetPodsArgs,
             tier0.get_pods,
         ),
         _spec(
             "describe_pod",
-            "Labels, annotations, env, resource limits and conditions of one pod.",
+            "Labels, annotations, env, resource limits and conditions of one pod. " + _NS,
             DescribePodArgs,
             tier0.describe_pod,
         ),
         _spec(
             "get_pod_logs",
-            "Recent log lines of a pod; previous=true for the crashed container.",
+            "Snapshot of the most recent log lines of one pod (1-200 lines; no streaming or "
+            "following). Set previous=true for the crashed container. " + _NS,
             GetPodLogsArgs,
             tier0.get_pod_logs,
         ),
         _spec(
-            "get_events", "Recent namespace events, newest first.", GetEventsArgs, tier0.get_events
+            "get_events",
+            "Recent events, newest first. " + _NS,
+            GetEventsArgs,
+            tier0.get_events,
         ),
         _spec(
             "get_deployment",
-            "Deployments: replicas, images, env, resource limits, conditions.",
+            "Deployments: replicas, images, env, resource limits, conditions. " + _NS,
             GetDeploymentArgs,
             tier0.get_deployment,
         ),
-        _spec("get_configmap", "ConfigMap contents.", GetConfigMapArgs, tier0.get_configmap),
-        _spec("get_service", "Services: type, ports, selector.", GetServiceArgs, tier0.get_service),
+        _spec(
+            "get_configmap",
+            "ConfigMap contents. " + _NS,
+            GetConfigMapArgs,
+            tier0.get_configmap,
+        ),
+        _spec(
+            "get_service",
+            "Services: type, ports, selector. " + _NS,
+            GetServiceArgs,
+            tier0.get_service,
+        ),
         _spec(
             "http_probe",
-            "HTTP GET a path on a service and return the status and body.",
+            "HTTP GET a path on a Service and return the status and body. " + _NS,
             HttpProbeArgs,
             tier0.http_probe,
         ),
         _spec(
             "get_metrics",
-            "Pod CPU and memory usage, if the metrics API is available.",
+            "Pod CPU and memory usage, if the metrics API is available. Takes no parameters. "
+            + _NS,
             GetMetricsArgs,
             tier0.get_metrics,
         ),
@@ -102,9 +123,8 @@ def call_tool(backend: Backend, name: str, raw_args: dict[str, Any] | None) -> T
     try:
         args = spec.args_model.model_validate(raw_args or {})
     except ValidationError as e:
-        # Report which fields failed, not the offending values (they may be hostile text).
-        fields = sorted({".".join(str(p) for p in err["loc"]) or "<root>" for err in e.errors()})
-        return fail(name, {}, f"invalid arguments: {', '.join(fields)}")
+        # Report which fields failed and why, never the offending values (hostile text).
+        return fail(name, {}, f"invalid arguments: {describe_error(spec.args_model, e.errors())}")
     return spec.fn(backend, args)
 
 
@@ -116,7 +136,7 @@ def tool_schemas(max_tier: Tier = Tier.READ_ONLY) -> list[dict[str, Any]]:
             "function": {
                 "name": s.name,
                 "description": s.description,
-                "parameters": s.args_model.model_json_schema(),
+                "parameters": flatten_parameters(s.args_model),
             },
         }
         for s in TOOLS.values()
