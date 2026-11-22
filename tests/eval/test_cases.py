@@ -5,10 +5,14 @@ import collections
 import pytest
 
 from watchtower.eval.tool_calling.cases import CASES, Call, Category, ExpectKind, User
+from watchtower.eval.tool_calling.heldout import HELDOUT_CASES
 from watchtower.eval.tool_calling.run import build_messages, fixture_backends
 from watchtower.tools.registry import TOOLS, call_tool
 
-BACKENDS = fixture_backends(c.fixture for c in CASES)
+# The gate is CASES alone (pre-registered in 0a146b2). HELDOUT_CASES are reported separately but
+# must be just as well-formed, so the per-case checks below run over both.
+ALL_CASES = CASES + HELDOUT_CASES
+BACKENDS = fixture_backends(c.fixture for c in ALL_CASES)
 
 
 def test_ids_unique_and_categories_covered():
@@ -20,8 +24,19 @@ def test_ids_unique_and_categories_covered():
     assert 25 <= len(CASES) <= 40
 
 
+def test_gate_is_still_the_thirty_preregistered_cases():
+    assert len(CASES) == 30
+
+
+def test_heldout_ids_unique_and_disjoint_from_gate():
+    ids = [c.id for c in ALL_CASES]
+    assert len(ids) == len(set(ids))
+    assert all(c.id.startswith("h") for c in HELDOUT_CASES)
+    assert set(collections.Counter(c.category for c in HELDOUT_CASES)) == set(Category)
+
+
 @pytest.mark.parametrize(
-    "case", [c for c in CASES if c.expect.kind == ExpectKind.CALL], ids=lambda c: c.id
+    "case", [c for c in ALL_CASES if c.expect.kind == ExpectKind.CALL], ids=lambda c: c.id
 )
 def test_expected_call_is_valid_and_runs_on_its_fixture(case):
     """The answer we score as correct must itself be a valid, working call."""
@@ -37,7 +52,7 @@ def test_expected_call_is_valid_and_runs_on_its_fixture(case):
     assert result.ok or uncaptured_probe, f"{case.id}: fails on {case.fixture}: {result.error}"
 
 
-@pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
+@pytest.mark.parametrize("case", ALL_CASES, ids=lambda c: c.id)
 def test_conversation_shape(case):
     assert isinstance(case.turns[0], User)
     calls = [t for t in case.turns if isinstance(t, Call)]
@@ -59,7 +74,7 @@ def test_conversation_shape(case):
 
 def test_chaining_targets_are_only_findable_from_the_tool_result():
     """C3 must test chaining: the target pod name is in the tool result, never in a prompt."""
-    for case in (c for c in CASES if c.category == Category.CHAINING):
+    for case in (c for c in ALL_CASES if c.category == Category.CHAINING):
         target = case.expect.args.get("pod") or case.expect.args.get("involved_object")
         if target is None:
             continue

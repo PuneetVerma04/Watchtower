@@ -17,7 +17,6 @@ HOSTILE_NAMES = [
     "a;rm -rf /",
     "UPPER",
     "a" * 254,
-    "",
     "name\nnewline",
 ]
 
@@ -28,6 +27,14 @@ def test_hostile_pod_names_rejected(name):
         GetPodsArgs(name=name)
     with pytest.raises(ValidationError):
         GetPodLogsArgs(pod=name)
+
+
+@pytest.mark.parametrize("blank", ["", "  ", "\t"])
+def test_blank_is_omitted_for_optional_and_rejected_for_required(blank):
+    # W4 round 2 (F1): a blank optional means "not supplied", it never becomes a value.
+    assert GetPodsArgs(name=blank).name is None
+    with pytest.raises(ValidationError):
+        GetPodLogsArgs(pod=blank)
 
 
 @pytest.mark.parametrize("name", ["worker", "worker-786756b787-2dhpg", "postgres-0", "a.b-c"])

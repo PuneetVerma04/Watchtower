@@ -4,7 +4,8 @@ import json
 
 from watchtower.eval.tool_calling import report
 from watchtower.eval.tool_calling.cases import CASES, ExpectKind
-from watchtower.eval.tool_calling.run import open_db, run_gate
+from watchtower.eval.tool_calling.heldout import HELDOUT_CASES
+from watchtower.eval.tool_calling.run import open_db, run_gate, select_cases
 from watchtower.models.client import ChatResponse, ModelError, ToolCall
 
 
@@ -25,7 +26,7 @@ class FakeClient:
         self.calls += 1
         n_tokens = len(json.dumps(messages)) // 4 + (len(json.dumps(tools)) // 4 if tools else 0)
         case_id = self.convos.get(json.dumps(messages))
-        case = next((c for c in CASES if c.id == case_id), None)
+        case = next((c for c in CASES + HELDOUT_CASES if c.id == case_id), None)
         calls, content = self.policy(case, options.seed if options else None)
         return ChatResponse(
             model=self.model,
@@ -77,6 +78,56 @@ def test_perfect_model_is_go(tmp_path):
     assert report.verdict(report.metrics(rows, run["n_planned"]))[0].startswith("GO")
     text = report.render(db, run_id)
     assert "GO: all hard thresholds met" in text and "## Failures" in text
+
+
+def test_suites_are_kept_apart():
+    assert select_cases(None) == list(CASES)
+    assert select_cases(None, "heldout") == list(HELDOUT_CASES)
+    assert {c.category.value for c in select_cases("C5", "heldout")} == {"C5"}
+    try:
+        select_cases(CASES[0].id, "heldout")  # a gate case id is not in the held-out pool
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("gate case id accepted in the held-out suite")
+
+
+def test_heldout_report_is_not_labelled_a_gate_verdict(tmp_path):
+    from watchtower.eval.tool_calling.run import build_messages, fixture_backends
+
+    client = FakeClient(oracle)
+    backends = fixture_backends(c.fixture for c in HELDOUT_CASES)
+    client.register({c.id: build_messages(c, backends[c.fixture]) for c in HELDOUT_CASES})
+    db = open_db(tmp_path / "h.sqlite")
+    run_id = run_gate(
+        client,
+        db,
+        cases=list(HELDOUT_CASES),
+        seeds=range(1),
+        meta={"model_digest": "d"},
+        log=lambda s: None,
+    )
+    text = report.render(db, run_id)
+    assert text.startswith("# W4 tool-calling: held-out set (not part of the gate)")
+    assert "Suggested verdict" not in text
+    assert "never pooled" in text
+
+
+def test_strict_arg_validity_counts_blank_arguments_as_invalid(tmp_path):
+    def blank_selector(case, seed):
+        if case is not None and case.id == "c2-selector":
+            return [
+                ToolCall(name="get_pods", arguments={"selector": "app=inventory", "name": ""})
+            ], ""
+        return oracle(case, seed)
+
+    _, db, run_id = _run(tmp_path, blank_selector)
+    run, rows = report.load(db, run_id)
+    m = report.metrics(rows, run["n_planned"])
+    strict, rescued = report.strict_arg_validity(rows)
+    assert rescued == 2  # c2-selector, both seeds: accepted only because "" is read as omitted
+    assert m["arg_validity"] == 1.0 and strict < 1.0
+    assert "Strict arg_validity" in report.render(db, run_id)
 
 
 def test_text_tool_calls_fail_structurally(tmp_path):
