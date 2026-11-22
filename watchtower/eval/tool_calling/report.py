@@ -26,7 +26,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from watchtower.eval.tool_calling.heldout import HELDOUT_CASES
 from watchtower.eval.tool_calling.thresholds import LATENCY_FLAG_P50_MS, THRESHOLDS
+
+HELDOUT_IDS = frozenset(c.id for c in HELDOUT_CASES)
 
 # Extrapolation inputs for the P3 throughput line. Stated in the report, not hidden.
 P3_CALLS_PER_AGENT_RUN = 10
@@ -85,6 +88,32 @@ def metrics(rows: list[dict], n_planned: int | None = None) -> dict[str, float |
         "hallucination_rate": _rate(answered, "hallucinated"),
         "completion_rate": len(answered) / planned if planned else None,
     }
+
+
+def _first_call_args(row: dict) -> dict | None:
+    if row["errored"] or not row["response"]:
+        return None
+    calls = json.loads(row["response"])["tool_calls"]
+    return calls[0]["arguments"] if calls else None
+
+
+def strict_arg_validity(rows: list[dict]) -> tuple[float | None, int]:
+    """arg_validity if a call containing an empty-string argument counted as invalid.
+
+    Since W4 round 2 the argument models read a blank optional ("") as omitted, so the gate's
+    arg_validity is more lenient than in rounds 0-1. This figure keeps the stricter reading
+    visible. Also returns how many calls were accepted only because of that reading.
+    """
+    with_call = [r for r in rows if r["expected"]["kind"] == "call" and r["n_calls"]]
+    if not with_call:
+        return None, 0
+    rescued = sum(
+        1
+        for r in with_call
+        if r["args_valid"] and any(v == "" for v in (_first_call_args(r) or {}).values())
+    )
+    valid = sum(1 for r in with_call if r["args_valid"])
+    return (valid - rescued) / len(with_call), rescued
 
 
 def per_seed(rows: list[dict]) -> dict[str, tuple[float, float, float, float] | None]:
@@ -161,14 +190,33 @@ def render(db: sqlite3.Connection, run_id: str | None = None) -> str:
     p50, p95 = _pct(latencies, 0.5), _pct(latencies, 0.95)
     seeds = json.loads(run["seeds"] or "[]")
 
+    heldout = bool(rows) and all(r["case_id"] in HELDOUT_IDS for r in rows)
+    if heldout:
+        head = [
+            "# W4 tool-calling: held-out set (not part of the gate)",
+            "",
+            "Informational only. These cases were committed after the first gate run to check "
+            "that a fix generalises beyond the 30 pre-registered cases. The pass marks below are "
+            "the gate's, shown for reference; they do not decide GO / FALLBACK / DESIGN CHANGE, "
+            "and these trials are never pooled into the gate metrics.",
+            "",
+            f"Reference verdict against the gate marks: {label}"
+            + (f" (missed: {', '.join(failed)})" if failed else ""),
+            "",
+        ]
+    else:
+        head = [
+            "# W4 tool-calling gate",
+            "",
+            f"**Suggested verdict: {label}**"
+            + (f" — missed: {', '.join(failed)}" if failed else ""),
+            "",
+            "The decision (GO / FALLBACK / DESIGN CHANGE) is recorded under *Resolved decisions* "
+            "in the roadmap, not here.",
+            "",
+        ]
     out = [
-        "# W4 tool-calling gate",
-        "",
-        f"**Suggested verdict: {label}**" + (f" — missed: {', '.join(failed)}" if failed else ""),
-        "",
-        "The decision (GO / FALLBACK / DESIGN CHANGE) is recorded under *Resolved decisions* in "
-        "the roadmap, not here.",
-        "",
+        *head,
         "## Setup",
         "",
         "| | |",
@@ -202,7 +250,12 @@ def render(db: sqlite3.Connection, run_id: str | None = None) -> str:
         thr = f"{t.op} {100 * t.value:.0f}%" if t.hard else "report only"
         out.append(f"| {t.metric} | {_f(m[t.metric])} | {sp} | {thr} | {mark} |")
 
+    strict, rescued = strict_arg_validity(rows)
     out += [
+        "",
+        f"Strict arg_validity (a call with an empty-string argument counts as invalid): "
+        f"{_f(strict)}; {rescued} call(s) were accepted only because a blank optional argument "
+        "is read as omitted.",
         "",
         "## By category",
         "",

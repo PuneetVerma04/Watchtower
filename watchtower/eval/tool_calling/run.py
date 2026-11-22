@@ -25,6 +25,7 @@ from typing import Any
 
 from watchtower.eval.tool_calling import report
 from watchtower.eval.tool_calling.cases import CASES, SYSTEM_PROMPT, Call, Case, User
+from watchtower.eval.tool_calling.heldout import HELDOUT_CASES
 from watchtower.eval.tool_calling.score import score
 from watchtower.eval.tool_calling.thresholds import NUM_CTX, SEEDS, TEMPERATURE
 from watchtower.models.client import (
@@ -104,11 +105,13 @@ def fixture_backends(names: Iterable[str]) -> dict[str, Backend]:
     return {n: ReplayBackend(load_json(FIXTURES_DIR / f"{n}.json")) for n in set(names)}
 
 
-def select_cases(spec: str | None) -> list[Case]:
+def select_cases(spec: str | None, suite: str = "gate") -> list[Case]:
+    """`suite` picks the pool: the 30 pre-registered gate cases, or the held-out set."""
+    pool = {"gate": CASES, "heldout": HELDOUT_CASES}[suite]
     if not spec:
-        return list(CASES)
+        return list(pool)
     wanted = {s.strip() for s in spec.split(",") if s.strip()}
-    chosen = [c for c in CASES if c.id in wanted or c.category.value in wanted]
+    chosen = [c for c in pool if c.id in wanted or c.category.value in wanted]
     unknown = wanted - {c.id for c in chosen} - {c.category.value for c in chosen}
     if unknown:
         raise SystemExit(f"unknown case ids/categories: {sorted(unknown)}")
@@ -326,6 +329,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seeds", type=int, default=len(SEEDS), help="seeds 0..N-1")
     p.add_argument("--temperature", type=float, default=TEMPERATURE)
     p.add_argument("--num-ctx", type=int, default=NUM_CTX)
+    p.add_argument(
+        "--suite",
+        choices=["gate", "heldout"],
+        default="gate",
+        help="gate: the 30 pre-registered cases (default). heldout: the separately reported set",
+    )
     p.add_argument("--cases", help="comma-separated case ids and/or categories (C1..C5)")
     p.add_argument("--server-note", default="", help='Ollama server settings, e.g. "KV=q8_0"')
     p.add_argument("--db", default=str(DEFAULT_DB))
@@ -337,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     except ModelConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 2
-    cases = select_cases(a.cases)
+    cases = select_cases(a.cases, a.suite)
     db = open_db(a.db)
     with OllamaClient.from_config(cfg) as client:
         try:
@@ -364,9 +373,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     full = not a.cases and a.seeds == len(SEEDS)
-    out = Path(a.report_dir) / (
-        "w4_tool_calling.md" if full else f"w4_tool_calling_partial_{run_id}.md"
-    )
+    if a.suite == "heldout":
+        name = f"w4_tool_calling_heldout_{run_id}.md"
+    else:
+        name = f"w4_tool_calling_{run_id}.md" if full else f"w4_tool_calling_partial_{run_id}.md"
+    out = Path(a.report_dir) / name
     text = report.render(db, run_id)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text)
